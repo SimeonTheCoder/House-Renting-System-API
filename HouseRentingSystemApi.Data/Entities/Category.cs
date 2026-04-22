@@ -9,7 +9,7 @@ namespace HouseRentingSystemApi.Data.Entities
 		public int Id { get; set; }
 		[Required]
 		[MaxLength(NameMaxLength)]
-		public string Name { get; set; }
+		public string Name { get; set; } = string.Empty;
 
 		public ICollection<House> Hosues { get; set; } = new List<House>();
 	}

@@ -1,6 +1,7 @@
 
 using HouseRentingSystemApi.Data;
 using HouseRentingSystemApi.Data.Entities;
+using HouseRentingSystemApi.Middleware;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -74,6 +75,8 @@ namespace HouseRentingSystemApi
 			builder.Services.AddAuthorization();
 			//--END NEW SECTION--
 			var app = builder.Build();
+
+			app.UseStopwatch();
 
 			// Configure the HTTP request pipeline.
 			if (app.Environment.IsDevelopment())
