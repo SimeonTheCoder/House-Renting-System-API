@@ -15,6 +15,7 @@ namespace HouseRentingSystemApi.Controllers
 	public class HouseController : ControllerBase
 	{
 		private AppDbContext context;
+		private const int ItemsPerPage = 4;
 
 		public HouseController(AppDbContext context)
 		{
@@ -56,7 +57,7 @@ namespace HouseRentingSystemApi.Controllers
 
 		[HttpGet("All")]
 		[Produces(typeof(IEnumerable<HouseDetailModel>))]
-		public async Task<IActionResult> GetAll([FromQuery] string category, [FromQuery] string search, [FromQuery] string sort)
+		public async Task<IActionResult> GetAll([FromQuery] string category, [FromQuery] string search, [FromQuery] string sort, [FromQuery] int page)
 		{
 			var query = context.Houses.AsNoTracking();
 
@@ -84,7 +85,16 @@ namespace HouseRentingSystemApi.Controllers
 				? queryB.OrderByDescending(h => h.PricePerMonth)
 				: queryB.OrderBy(h => h.PricePerMonth);
 
-			var model = await queryB.ToListAsync();
+			int allCount = await queryB.CountAsync();
+
+			page--;
+
+			if (page == -1)
+			{
+				return BadRequest("Invalid page");
+			}
+
+			var model = await queryB.Skip(page * ItemsPerPage).Take(ItemsPerPage).ToListAsync();
 
 			return Ok(model);
 		}
