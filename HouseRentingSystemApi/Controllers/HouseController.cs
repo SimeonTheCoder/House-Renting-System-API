@@ -1,6 +1,7 @@
 ﻿using HouseRentingSystemApi.Data;
 using HouseRentingSystemApi.Data.Entities;
 using HouseRentingSystemApi.Models;
+using HouseRentingSystemApi.Models.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -20,20 +21,70 @@ namespace HouseRentingSystemApi.Controllers
 			this.context = context;
 		}
 
+		// [HttpGet("All")]
+		// [Produces(typeof(IEnumerable<HouseDetailModel>))]
+		// public async Task<IActionResult> GetAll()
+		// {
+		// 	var model = await context.Houses
+		// 		.AsNoTracking()
+		// 		.Where(h => !h.IsDeleted)
+		// 		.Select(h => new HouseDetailModel()
+		// 		{
+		// 			Title = h.Title,
+		// 			Address = h.Address,
+		// 			ImageUrl = h.ImageUrl
+		// 		})
+		// 		.ToListAsync();
+
+		// 	return Ok(model);
+		// }
+
+		public bool ShouldInclude(House house, string search, string category)
+		{
+			bool isValidCategory = true;
+
+			if (category.Trim() != "")
+				isValidCategory = house.Category.Name.ToLower().Contains(category.ToLower());
+
+			bool isInSearch = true;
+
+			if (search.Trim() != "")
+				isInSearch = house.Title.ToLower().Contains(search.ToLower()) || house.Description.ToLower().Contains(search.ToLower());
+
+			return isValidCategory && isInSearch;
+		}
+
 		[HttpGet("All")]
 		[Produces(typeof(IEnumerable<HouseDetailModel>))]
-		public async Task<IActionResult> GetAll()
+		public async Task<IActionResult> GetAll([FromQuery] string category, [FromQuery] string search, [FromQuery] string sort)
 		{
-			var model = await context.Houses
-				.AsNoTracking()
-				.Where(h => !h.IsDeleted)
-				.Select(h => new HouseDetailModel()
+			var query = context.Houses.AsNoTracking();
+
+			if (!string.IsNullOrWhiteSpace(search)) {
+				query = query.Where(h => h.Title.ToLower().Contains(search.ToLower()) || h.Description.ToLower().Contains(search.ToLower()));
+			}
+
+			if (!string.IsNullOrWhiteSpace(category)) {
+				if ((await context.Categories.AsNoTracking().Where(c => c.Name.ToLower() == category).ToListAsync()).Count != 1)
+					return BadRequest();
+
+				query = query.Where(h => h.Category.Name.ToLower() == category.ToLower());
+			}
+
+			var queryB = query.Select(h => new HouseDetailModel()
 				{
 					Title = h.Title,
 					Address = h.Address,
-					ImageUrl = h.ImageUrl
-				})
-				.ToListAsync();
+					ImageUrl = h.ImageUrl,
+					PricePerMonth = h.PricePerMonth,
+					Category = h.Category.Name
+				});
+
+			queryB = (!string.IsNullOrWhiteSpace(sort) && sort == "desc")
+				? queryB.OrderByDescending(h => h.PricePerMonth)
+				: queryB.OrderBy(h => h.PricePerMonth);
+
+			var model = await queryB.ToListAsync();
 
 			return Ok(model);
 		}
@@ -141,7 +192,7 @@ namespace HouseRentingSystemApi.Controllers
 				return NotFound("House not found!");
 			}
 
-			Category? category = await context.Categories.FirstOrDefaultAsync(c => c.Name == model.Category.GetDisplayName());
+			Category? category = await context.Categories.FirstOrDefaultAsync(c => c.Name == model.Category);
 
 			if(category == null)
 			{

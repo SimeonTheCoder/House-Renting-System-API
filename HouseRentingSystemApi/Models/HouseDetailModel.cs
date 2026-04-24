@@ -10,14 +10,14 @@ namespace HouseRentingSystemApi.Models
 	{
 
 		[MaxLength(TitleMaxLength)]
-		public string Title { get; set; }
+		public string Title { get; set; } = string.Empty;
 
 		[MaxLength(AddressMaxLength)]
-		public string  Address { get; set; }
-		public string ImageUrl { get; set; }
-		public string Description { get; set; }
+		public string  Address { get; set; } = string.Empty;
+		public string ImageUrl { get; set; } = string.Empty;
+		public string Description { get; set; } = string.Empty;
 		public decimal PricePerMonth { get; set; }
 
-		public CategoryViewEnum Category { get; set; }
+		public string Category { get; set; } = string.Empty;
 	}
 }
