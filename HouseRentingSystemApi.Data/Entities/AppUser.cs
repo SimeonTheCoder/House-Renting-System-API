@@ -2,7 +2,5 @@
 
 namespace HouseRentingSystemApi.Data.Entities
 {
-	public class AppUser : IdentityUser
-	{
-	}
+    public class AppUser : IdentityUser { }
 }

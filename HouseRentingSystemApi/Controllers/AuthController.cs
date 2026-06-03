@@ -1,144 +1,165 @@
-﻿using HouseRentingSystemApi.Data.Entities;
+﻿using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using HouseRentingSystemApi.Data.DataConstants;
+using HouseRentingSystemApi.Data.Entities;
 using HouseRentingSystemApi.Models.Auth;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
 
 namespace HouseRentingSystemApi.Controllers
 {
-	[Route("api/[controller]")]
-	
-	public class AuthController : Controller
-	{
-		private readonly UserManager<AppUser> userManager;
-		private readonly IConfiguration config;
+    [Route("api/[controller]")]
+    public class AuthController : Controller
+    {
+        private readonly UserManager<AppUser> userManager;
+        private readonly RoleManager<IdentityRole> roleManager;
+        private readonly IConfiguration config;
 
-		public AuthController(UserManager<AppUser> userManager
-			,IConfiguration config)
-		{
-			this.userManager = userManager;
-			this.config = config;
-		}
+        public AuthController(
+            UserManager<AppUser> userManager,
+            RoleManager<IdentityRole> roleManager,
+            IConfiguration config
+        )
+        {
+            this.userManager = userManager;
+            this.roleManager = roleManager;
 
+            this.config = config;
+        }
 
-		[HttpPost("/login")]
-		[Produces(typeof(AuthResult))]
-		public async Task<IActionResult> Login([FromBody] AuthModel model)
-		{
-			if (ModelState.IsValid == false)
-			{
-				var allErrors = ModelState.Values
-					.SelectMany(v => v.Errors)
-					.Select(e => e.ErrorMessage)
-					.ToArray();
+        [HttpPost("/login")]
+        [Produces(typeof(AuthResult))]
+        public async Task<IActionResult> Login([FromBody] AuthModel model)
+        {
+            if (ModelState.IsValid == false)
+            {
+                var allErrors = ModelState
+                    .Values.SelectMany(v => v.Errors)
+                    .Select(e => e.ErrorMessage)
+                    .ToArray();
 
-				return BadRequest(PopulateResult(400, null, allErrors));
-			}
-			var user =  await userManager.FindByEmailAsync(model.Email);
+                return BadRequest(PopulateResult(400, null, allErrors));
+            }
 
-			if (user == null) 
-			{
-			
-			}
+            var user = await userManager.FindByEmailAsync(model.Email);
 
-			var result = await userManager.CheckPasswordAsync(user, model.Password);
-			if (result == false)
-			{
-				return Unauthorized(PopulateResult(400, null, "Invalid email or password"));
-			}
+            if (user == null)
+                return Unauthorized(PopulateResult(400, null, "Invalid email or password"));
 
-			var token = GenerateJwtToken(user);
-			return Ok(PopulateResult(200,token,"User logged in successfully"));
+            var result = await userManager.CheckPasswordAsync(user, model.Password);
+            if (result == false)
+            {
+                return Unauthorized(PopulateResult(400, null, "Invalid email or password"));
+            }
 
+            var token = GenerateJwtToken(user);
+            return Ok(PopulateResult(200, token, "User logged in successfully"));
+        }
 
-		}
-		[HttpPost("/register")]
-		[Produces(typeof(AuthResult))]
-		public async Task<IActionResult> Resgister([FromBody]AuthModel model)
-		{
-			if(ModelState.IsValid == false)
-			{
-				var allErrors = ModelState.Values
-					.SelectMany(v => v.Errors)
-					.Select(e => e.ErrorMessage)
-					.ToArray();
+        [HttpPost("/register")]
+        [Produces(typeof(AuthResult))]
+        public async Task<IActionResult> Resgister([FromBody] AuthModel model)
+        {
+            if (ModelState.IsValid == false)
+            {
+                var allErrors = ModelState
+                    .Values.SelectMany(v => v.Errors)
+                    .Select(e => e.ErrorMessage)
+                    .ToArray();
 
-				return Unauthorized(PopulateResult(400,null,allErrors));
-			}
-			
-			var user = await userManager.FindByEmailAsync(model.Email);
-			
-			if (user != null)
-			{
-				return BadRequest(PopulateResult(400,null, "User Already exists"));
-			}
-			var newUser = new AppUser()
-			{
-				Email = model.Email,
-				UserName = model.Username
-			};
-			var result = await userManager.CreateAsync(newUser,model.Password);
+                return Unauthorized(PopulateResult(400, null, allErrors));
+            }
 
-			if (result.Succeeded)
-			{
-				return Ok(PopulateResult(200,null,"User registered Successfully"));
-			}
-			
-		
-			return BadRequest(PopulateResult(
-				400,
-				null, 
-				result.Errors
-				.Select(e => e.Description)
-				.ToArray()));
-		}
+            var user = await userManager.FindByEmailAsync(model.Email);
 
-		private string GenerateJwtToken(AppUser user)
-		{
-			var jwtSection = config.GetSection("Jwt");
-			var key = jwtSection["Key"]!;
+            if (user != null)
+            {
+                return BadRequest(PopulateResult(400, null, "User Already Exists!"));
+            }
 
-			var claims = new List<Claim>
-			{
-				new Claim(JwtRegisteredClaimNames.Sub, user.Id),
-				new Claim(JwtRegisteredClaimNames.UniqueName, user.UserName!),
-				new Claim(JwtRegisteredClaimNames.Email, user.Email ?? ""),
-				new Claim(ClaimTypes.NameIdentifier, user.Id),
-				new Claim(ClaimTypes.Name, user.UserName!)
-			};
+            if (model.Role != UserRoleNames.Client && model.Role != UserRoleNames.Agent)
+            {
+                return BadRequest(PopulateResult(400, null, "Invalid Role!"));
+            }
 
-			var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
-			var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
+            var newUser = new AppUser() { Email = model.Email, UserName = model.Username };
+            var userCreationSuccessful = await userManager.CreateAsync(newUser, model.Password);
 
-			var expires = DateTime.UtcNow.AddMinutes(
-				int.Parse(jwtSection["ExpiresMinutes"]!)
-			);
+            if (!userCreationSuccessful.Succeeded)
+            {
+                return BadRequest(
+                    PopulateResult(
+                        400,
+                        null,
+                        userCreationSuccessful.Errors.Select(e => e.Description).ToArray()
+                    )
+                );
+            }
 
-			var token = new JwtSecurityToken(
-				issuer: jwtSection["Issuer"],
-				audience: jwtSection["Audience"],
-				claims: claims,
-				expires: expires,
-				signingCredentials: credentials
-			);
+            var userRoleAssignmentSuccessful = await userManager.AddToRoleAsync(
+                newUser,
+                model.Role
+            );
 
-			return new JwtSecurityTokenHandler().WriteToken(token);
-		}
+            if (!userRoleAssignmentSuccessful.Succeeded)
+            {
+                return BadRequest(
+                    PopulateResult(
+                        400,
+                        null,
+                        userCreationSuccessful.Errors.Select(e => e.Description).ToArray()
+                    )
+                );
+            }
 
-		private AuthResult PopulateResult(int code,string? token = null, params string[] messages)
-		{
-			var result = new AuthResult();
-			result.Code = code;
-			result.Message = string.Join(Environment.NewLine, messages);
-			if (token != null)
-			{
-				result.Token = token;
-			}
+            var token = GenerateJwtToken(newUser);
+            return Ok(PopulateResult(200, token, "User registered Successfully"));
+        }
 
-			return result;
-		}
-	}
+        private string GenerateJwtToken(AppUser user)
+        {
+            var jwtSection = config.GetSection("Jwt");
+            var key = jwtSection["Key"]!;
+
+            var claims = new List<Claim>
+            {
+                new Claim(JwtRegisteredClaimNames.Sub, user.Id),
+                new Claim(JwtRegisteredClaimNames.UniqueName, user.UserName!),
+                new Claim(JwtRegisteredClaimNames.Email, user.Email ?? ""),
+                new Claim(ClaimTypes.NameIdentifier, user.Id),
+                new Claim(ClaimTypes.Name, user.UserName!),
+            };
+
+            var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
+            var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
+
+            var expires = DateTime.UtcNow.AddMinutes(int.Parse(jwtSection["ExpiresMinutes"]!));
+
+            var token = new JwtSecurityToken(
+                issuer: jwtSection["Issuer"],
+                audience: jwtSection["Audience"],
+                claims: claims,
+                expires: expires,
+                signingCredentials: credentials
+            );
+
+            return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+
+        private AuthResult PopulateResult(int code, string? token = null, params string[] messages)
+        {
+            var result = new AuthResult()
+            {
+                Code = code,
+                Message = string.Join(Environment.NewLine, messages),
+            };
+
+            if (token != null)
+                result.Token = token;
+
+            return result;
+        }
+    }
 }
