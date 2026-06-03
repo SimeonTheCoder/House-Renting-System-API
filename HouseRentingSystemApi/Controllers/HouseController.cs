@@ -1,14 +1,11 @@
-﻿using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
+﻿using System.Security.Claims;
+using HouseRentingSystemApi.Contracts;
 using HouseRentingSystemApi.Data;
 using HouseRentingSystemApi.Data.Entities;
 using HouseRentingSystemApi.Models;
-using HouseRentingSystemApi.Models.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.OpenApi.Extensions;
 
 namespace HouseRentingSystemApi.Controllers
 {
@@ -16,32 +13,20 @@ namespace HouseRentingSystemApi.Controllers
     public class HouseController : ControllerBase
     {
         private AppDbContext context;
+        private IHouseService houseService;
         private UserManager<AppUser> userManager;
         private const int ItemsPerPage = 4;
 
-        public HouseController(AppDbContext context, UserManager<AppUser> userManager)
+        public HouseController(
+            AppDbContext context,
+            UserManager<AppUser> userManager,
+            IHouseService service
+        )
         {
             this.context = context;
             this.userManager = userManager;
+            this.houseService = service;
         }
-
-        // [HttpGet("All")]
-        // [Produces(typeof(IEnumerable<HouseDetailModel>))]
-        // public async Task<IActionResult> GetAll()
-        // {
-        // 	var model = await context.Houses
-        // 		.AsNoTracking()
-        // 		.Where(h => !h.IsDeleted)
-        // 		.Select(h => new HouseDetailModel()
-        // 		{
-        // 			Title = h.Title,
-        // 			Address = h.Address,
-        // 			ImageUrl = h.ImageUrl
-        // 		})
-        // 		.ToListAsync();
-
-        // 	return Ok(model);
-        // }
 
         public bool ShouldInclude(House house, string search, string category)
         {
@@ -69,57 +54,14 @@ namespace HouseRentingSystemApi.Controllers
             [FromQuery] int page
         )
         {
-            var query = context.Houses.AsNoTracking();
-
-            if (!string.IsNullOrWhiteSpace(search))
+            try
             {
-                query = query.Where(h =>
-                    h.Title.ToLower().Contains(search.ToLower())
-                    || h.Description.ToLower().Contains(search.ToLower())
-                );
+                return Ok(await houseService.GetAll(category, search, sort, page));
             }
-
-            if (!string.IsNullOrWhiteSpace(category))
+            catch (Exception)
             {
-                if (
-                    (
-                        await context
-                            .Categories.AsNoTracking()
-                            .Where(c => c.Name.ToLower() == category)
-                            .ToListAsync()
-                    ).Count != 1
-                )
-                    return BadRequest();
-
-                query = query.Where(h => h.Category.Name.ToLower() == category.ToLower());
+                return BadRequest("Invalid query!");
             }
-
-            var queryB = query.Select(h => new HouseDetailModel()
-            {
-                Title = h.Title,
-                Address = h.Address,
-                ImageUrl = h.ImageUrl,
-                PricePerMonth = h.PricePerMonth,
-                Category = h.Category.Name,
-            });
-
-            queryB =
-                (!string.IsNullOrWhiteSpace(sort) && sort == "desc")
-                    ? queryB.OrderByDescending(h => h.PricePerMonth)
-                    : queryB.OrderBy(h => h.PricePerMonth);
-
-            int allCount = await queryB.CountAsync();
-
-            page--;
-
-            if (page == -1)
-            {
-                return BadRequest("Invalid page");
-            }
-
-            var model = await queryB.Skip(page * ItemsPerPage).Take(ItemsPerPage).ToListAsync();
-
-            return Ok(model);
         }
 
         [HttpGet("me")]
@@ -135,20 +77,14 @@ namespace HouseRentingSystemApi.Controllers
         [Produces(typeof(HouseDetailModel))]
         public async Task<IActionResult> GetById(int id)
         {
-            var house = await context.Houses.FirstOrDefaultAsync(h => h.Id == id);
-            if (house == null || house.IsDeleted)
+            try
+            {
+                return Ok(await houseService.GetById(id));
+            }
+            catch (NullReferenceException)
             {
                 return NotFound();
             }
-
-            return Ok(
-                new HouseDetailModel()
-                {
-                    Title = house.Title,
-                    Address = house.Address,
-                    ImageUrl = house.ImageUrl,
-                }
-            );
         }
 
         [Authorize(Roles = "Agent")]
@@ -157,56 +93,35 @@ namespace HouseRentingSystemApi.Controllers
         public async Task<IActionResult> Create([FromBody] HouseDetailModel model)
         {
             if (ModelState.IsValid == false)
-            {
                 return BadRequest();
-            }
 
-            var isAuthenticated = User.Identity?.IsAuthenticated;
+            var isAuthenticated = User.Identity?.IsAuthenticated ?? false;
+
+            if (!isAuthenticated)
+                return Unauthorized();
+
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
-            var newHouse = new House()
+            try
             {
-                Description = model.Description,
-                PricePerMonth = model.PricePerMonth,
-                Address = model.Address,
-                Title = model.Title,
+                House house = await houseService.Create(model, userId!);
 
-                ImageUrl = model.ImageUrl,
-            };
-
-            //var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            var userEmail = User.FindFirstValue(ClaimTypes.Email);
-
-            var category = await context.Categories.FirstOrDefaultAsync(c =>
-                c.Name == model.Category.ToString()
-            );
-            if (category == null)
-            {
-                var newCategory = new Category() { Name = model.Category.ToString() };
-                context.Categories.Add(newCategory);
-                await context.SaveChangesAsync();
-                newHouse.CategoryId = newCategory.Id;
-            }
-            else
-            {
-                newHouse.CategoryId = category.Id;
-            }
-            newHouse.UserId = userId;
-            context.Houses.Add(newHouse);
-            await context.SaveChangesAsync();
-
-            return Created(
-                $"api/All/{newHouse.Id}",
-                new HouseDetailModel()
+                HouseDetailModel dto = new()
                 {
-                    Address = newHouse.Address,
-                    ImageUrl = newHouse.ImageUrl,
-                    Title = newHouse.Title,
-                    Description = newHouse.Description,
-                    PricePerMonth = newHouse.PricePerMonth,
+                    Address = house.Address,
+                    ImageUrl = house.ImageUrl,
+                    Title = house.Title,
+                    Description = house.Description,
+                    PricePerMonth = house.PricePerMonth,
                     Category = model.Category,
-                }
-            );
+                };
+
+                return Created($"api/All/{house.Id}", house);
+            }
+            catch (NullReferenceException nre)
+            {
+                return NotFound(nre.Message);
+            }
         }
 
         [Authorize(Roles = "Agent")]
@@ -214,64 +129,53 @@ namespace HouseRentingSystemApi.Controllers
         [Produces(typeof(HouseDetailModel))]
         public async Task<IActionResult> Edit(int id, [FromBody] HouseDetailModel model)
         {
-            if (ModelState.IsValid == false)
+            if (!ModelState.IsValid)
             {
                 ModelState
                     .Values.SelectMany(v => v.Errors)
                     .ToList()
                     .ForEach(e => Console.WriteLine(e.ErrorMessage));
+
                 return BadRequest(
                     ModelState.Values.SelectMany(v => v.Errors).ToList().First().ErrorMessage
                 );
             }
 
-            House? house = await context.Houses.FirstOrDefaultAsync(h => h.Id == id)!;
-
-            if (house == null || house.IsDeleted)
+            try
             {
-                return NotFound("House not found!");
+                House editedHouse = await houseService.Edit(id, model);
+
+                HouseDetailModel dto = new()
+                {
+                    Address = editedHouse.Address,
+                    ImageUrl = editedHouse.ImageUrl,
+                    Title = editedHouse.Title,
+                    Description = editedHouse.Description,
+                    PricePerMonth = editedHouse.PricePerMonth,
+                    Category = model.Category,
+                };
+
+                return Ok(dto);
             }
-
-            Category? category = await context.Categories.FirstOrDefaultAsync(c =>
-                c.Name == model.Category
-            );
-
-            if (category == null)
+            catch (NullReferenceException e)
             {
-                return NotFound("Category not found!");
+                return NotFound(e.Message);
             }
-
-            house.Category = category;
-            house.Title = model.Title;
-            house.Address = model.Address;
-            house.Description = model.Description;
-            house.PricePerMonth = model.PricePerMonth;
-            house.ImageUrl = model.ImageUrl;
-
-            await context.SaveChangesAsync();
-            return Ok();
         }
 
         [Authorize(Roles = "Agent")]
         [HttpDelete("delete/{id}")]
         public async Task<IActionResult> Delete(int id)
         {
-            House? house = await context.Houses.FirstOrDefaultAsync(h => h.Id == id)!;
-
-            if (house == null)
+            try
             {
-                return NotFound("House not found!");
+                await houseService.Delete(id);
+                return Ok("House successfully deleted!");
             }
-
-            if (house.IsDeleted)
+            catch (NullReferenceException nre)
             {
-                return BadRequest("House already deleted.");
+                return NotFound(nre.Message);
             }
-
-            house.IsDeleted = true;
-            context.SaveChanges();
-
-            return Ok("House successfully deleted!");
         }
 
         [Authorize(Roles = "Client")]
@@ -281,34 +185,21 @@ namespace HouseRentingSystemApi.Controllers
             string? userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
             if (userId == null)
-            {
                 return NotFound("User not found!");
-            }
 
-            AppUser? user = await userManager.FindByIdAsync(userId);
-
-            if (user == null)
+            try
             {
-                return NotFound("User not found!");
+                await houseService.Rent(id, userId);
+                return Ok("House successfully rented!");
             }
-
-            House? house = await context.Houses.FirstOrDefaultAsync(h => h.Id == id);
-
-            if (house == null)
+            catch (NullReferenceException nre)
             {
-                return NotFound("House not found!");
+                return NotFound(nre.Message);
             }
-
-            if (house.Renter != null)
+            catch (Exception ex)
             {
-                return BadRequest("House alread rented!");
+                return BadRequest(ex.Message);
             }
-
-            house.Renter = user;
-
-            await context.SaveChangesAsync();
-
-            return Ok("House successfully rented!");
         }
     }
 }

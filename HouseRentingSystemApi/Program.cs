@@ -1,8 +1,10 @@
 using System.Text;
+using HouseRentingSystemApi.Contracts;
 using HouseRentingSystemApi.Data;
 using HouseRentingSystemApi.Data.DataConstants;
 using HouseRentingSystemApi.Data.Entities;
 using HouseRentingSystemApi.Middleware;
+using HouseRentingSystemApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -56,6 +58,8 @@ namespace HouseRentingSystemApi
             //---NEW SECTION---
             var jwtSection = builder.Configuration.GetSection("Jwt");
             var key = jwtSection["Key"];
+
+            builder.Services.AddScoped<IHouseService, HouseService>();
 
             builder
                 .Services.AddAuthentication(options =>
